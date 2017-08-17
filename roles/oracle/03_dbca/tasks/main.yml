@@ -1,0 +1,207 @@
+# ORACLE_HOMEにlistener.oraが存在するか確認する。
+- name: check whether listener.ora aleady created
+  stat: path={{ oracle_home }}/network/admin/listener.ora
+  register: listener
+
+# listener.oraが存在しない場合、ローカルホストのlistener.oraを配布する。
+- name: copy listener.ora Ansible to target host
+  when: listener.stat.exists == false
+  copy: 
+    src: "{{ work_dir_local }}/listener.ora"
+    dest: "{{ oracle_home }}/network/admin/"
+    owner: "{{ oracle_user }}"
+    group: "{{ oinstall_group }}"
+    mode: 0644
+
+# 配布したlistener.ora内の変数(&&oracle_hostname)をリモートホストのホスト名に書き換える。
+- name: replace &&oracle_hostname
+  when: listener.stat.exists == false
+  replace:
+    dest: "{{ oracle_home }}/network/admin/listener.ora"
+    regexp: "&&oracle_hostname"
+    replace: "{{ oracle_hostname }}"
+
+# 配布したlistener.ora内の変数(&&listener_port)をリモートホストで使用するリスナーポート番号に書き換える。
+- name: replace &&listener_port
+  when: listener.stat.exists == false
+  replace:
+    dest: "{{ oracle_home }}/network/admin/listener.ora"
+    regexp: "&&listener_port"
+    replace: "{{ listener_port }}"
+
+# リスナーが起動しているか確認する。
+- name: check listener status
+  become_user: "{{ oracle_user }}"
+  shell: ". ~/.bash_profile && {{ oracle_home }}/bin/lsnrctl status"
+  register: cmd_result
+  ignore_errors: True
+
+# リスナーが起動していない場合は起動する。
+- name: start listener
+  become_user: "{{ oracle_user }}"
+  when: cmd_result.rc == 1
+  shell: ". ~/.bash_profile && {{ oracle_home }}/bin/lsnrctl start {{ listener_name }}"
+
+# ORACLE_HOMEにパスワードファイルが存在するか確認する。
+# パスワードファイルが存在しない場合、DB未作成と判断して以降のタスクを実行する。
+- name: check whether db aleady created (password file aleady created)
+  stat: path={{ oracle_home }}/dbs/orapw{{ db_name }}
+  register: orapw
+
+# ローカルホストのscripts.tarをリモートホストに配布する。
+- name: copy scripts.tar Ansible to target host
+  when: orapw.stat.exists == false
+  copy:
+    src: "{{ work_dir_local }}/{{ oracle_scripts_tar }}"
+    dest: "{{ oracle_scripts_dir_remote }}/"
+    owner: "{{ oracle_user }}"
+    group: "{{ oinstall_group }}"
+    mode: 0644
+
+# scripts.tarを展開する。
+- name: unarchive scripts.tar
+  when: orapw.stat.exists == false
+  unarchive:
+    src: "{{ oracle_scripts_dir_remote }}/{{ oracle_scripts_tar }}"
+    dest: "{{ oracle_scripts_dir_remote }}/"
+    owner: "{{ oracle_user }}"
+    group: "{{ oinstall_group }}"
+    copy: no
+  environment:
+    LANG: C
+    LC_ALL: C
+    LC_MESSAGES: C
+
+# init.ora内の変数(&&oracle_base)をリモートホストで使用するORACLE_BASEに書き換える。
+- name: replace &&oracle_base
+  when: orapw.stat.exists == false
+  replace:
+    dest: "{{ oracle_scripts_dir_remote }}/scripts/init.ora"
+    regexp: "&&ORACLE_BASE"
+    replace: "{{ oracle_base }}"
+
+# init.ora内の変数(&&db_name)をリモートホストで使用するデータベース名に書き換える。
+- name: replace &&db_name
+  when: orapw.stat.exists == false
+  replace:
+    dest: "{{ oracle_scripts_dir_remote }}/scripts/init.ora"
+    regexp: "&&DB_NAME"
+    replace: "{{ db_name }}"
+
+# wrapper_orcl.sh内の変数(&&db_name)をリモートホストで使用するデータベース名に書き換える。
+- name: replace &&db_name
+  when: orapw.stat.exists == false
+  replace:
+    dest: "{{ oracle_scripts_dir_remote }}/scripts/wrapper_orcl.sh"
+    regexp: "&&DB_NAME"
+    replace: "{{ db_name }}"
+
+# wrapper_orcl.shを実行する。
+- name: execute wrapper_orcl.sh
+  when: orapw.stat.exists == false
+  become_user: "{{ oracle_user }}"
+  shell: ". ~/.bash_profile && {{ oracle_scripts_dir_remote }}/scripts/wrapper_orcl.sh {{ db_name }} {{ sys_password }} {{ system_password }}"
+
+# CreateDB.logにORA-で始まるエラーが存在しないことを確認する。
+- name: check CreateDB.log
+  when: orapw.stat.exists == false
+  shell:
+    grep -e "^ORA-" {{ oracle_scripts_dir_remote }}/scripts/CreateDB.log | wc -l
+  register: cmd_result
+  failed_when: cmd_result.stdout > "0"
+
+# CreateDBFiles.logにORA-で始まるエラーが存在しないことを確認する。
+- name: check CreateDBFiles.log
+  when: orapw.stat.exists == false
+  shell:
+    grep -e "^ORA-" {{ oracle_scripts_dir_remote }}/scripts/CreateDBFiles.log | wc -l
+  register: cmd_result
+  failed_when: cmd_result.stdout > "0"
+
+# CreateDBCatalog.logにORA-で始まるエラーが存在しないことを確認する。
+# ただし、一部の問題ないORA-エラーは除外する。
+- name: check CreateDBCatalog.log
+  when: orapw.stat.exists == false
+  shell: >
+    grep -e "^ORA-" {{ oracle_scripts_dir_remote }}/scripts/CreateDBCatalog.log
+    | cut -d':' -f1 | sort -u
+    | grep -v "^ORA-00942"
+    | grep -v "^ORA-01418"
+    | grep -v "^ORA-01432"
+    | grep -v "^ORA-01434"
+    | grep -v "^ORA-01919"
+    | grep -v "^ORA-02289"
+    | grep -v "^ORA-04043"
+    | grep -v "^ORA-04080"
+    | grep -v "^ORA-29807"
+    | grep -v "^ORA-29833"
+    | grep -v "^ORA-01921"
+  register: cmd_result
+  failed_when: cmd_result.stdout > "0"
+
+# lockAccount.logにORA-で始まるエラーが存在しないことを確認する。
+- name: check lockAccount.log
+  when: orapw.stat.exists == false
+  shell:
+    grep -e "^ORA-" {{ oracle_scripts_dir_remote }}/scripts/lockAccount.log | wc -l
+  register: cmd_result
+  failed_when: cmd_result.stdout > "0"
+
+# postDBCreationg.logにORA-で始まるエラーが存在しないことを確認する。
+- name: check postDBCreation.log
+  when: orapw.stat.exists == false
+  shell:
+    grep -e "^ORA-" {{ oracle_scripts_dir_remote }}/scripts/postDBCreation.log | wc -l
+  register: cmd_result
+  failed_when: cmd_result.stdout > "0"
+
+# sqlPlusHelp.logにORA-で始まるエラーが存在しないことを確認する。
+- name: check sqlPlusHelp.log
+  when: orapw.stat.exists == false
+  shell:
+    grep -e "^ORA-" {{ oracle_scripts_dir_remote }}/scripts/sqlPlusHelp.log | wc -l
+  register: cmd_result
+  failed_when: cmd_result.stdout > "0"
+
+# DBが起動していることを確認する。
+- name: check whether db up
+  shell: ps -ef | grep ora_pmon_{{ oracle_sid }} | wc -l
+  register: cmd_result
+  ignore_errors: True
+
+# listenerにDBが登録されていることを確認する。
+- name: check listener status
+  become_user: "{{ oracle_user }}"
+  shell: ". ~/.bash_profile && {{ oracle_home }}/bin/lsnrctl status"
+
+# /etc/oratabが存在するか確認する。
+- name: check whether /etc/oratab aleady created
+  stat: path=/etc/oratab
+  register: oratab
+
+# /etc/oratabが存在しない場合、ローカルホストのoratabを配布する。
+- name: copy oratab Ansible to target host
+  when: oratab.stat.exists == false
+  copy: 
+    src: "{{ work_dir_local }}/oratab"
+    dest: /etc/
+    owner: "{{ oracle_user }}"
+    group: "{{ oinstall_group }}"
+    mode: 0644
+
+# 配布したoratab内の変数(&&oracle_sid)をリモートホストで使用するORACLE_SIDに書き換える。
+- name: replace &&oracle_sid
+  when: oratab.stat.exists == false
+  replace:
+    dest: /etc/oratab
+    regexp: "&&oracle_sid"
+    replace: "{{ oracle_sid }}"
+
+# 配布したoratab内の変数(&&oracle_home)をリモートホストで使用するORACLE_HOMEに書き換える。
+- name: replace &&oracle_home
+  when: oratab.stat.exists == false
+  replace:
+    dest: /etc/oratab
+    regexp: "&&oracle_home"
+    replace: "{{ oracle_home }}"
+

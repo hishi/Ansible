@@ -1,0 +1,20 @@
+- hosts: all
+  become_method: sudo
+  remote_user: root
+  gather_facts: yes
+  tasks:
+    - name: add user ansible
+      user:
+        name: ansible
+
+    - name: Add sudo privileges to ansible
+      lineinfile: 
+        dest: /etc/sudoers
+        regexp: '^ansible ALL\=\(ALL\) NOPASSWD\:ALL'
+        line: 'ansible ALL=(ALL) NOPASSWD:ALL'
+        backup: yes
+
+    - name: add authorized_key for ansible user
+      authorized_key:
+        user: ansible
+        key: "{{ lookup('file', '/root/.ssh/id_rsa.pub') }}"

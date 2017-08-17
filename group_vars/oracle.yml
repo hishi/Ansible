@@ -1,0 +1,190 @@
+###############################################################################
+## os settings
+###############################################################################
+oracle_hostname:            "{{ inventory_hostname }}"
+distribution:               CentOS
+distribution_major_version: 7
+mount_point_for_linux:      /media/{{ distribution }}
+yum_repository_name:        c{{ distribution_major_version }}-media
+iso_for_linux:              /vagrant/media/{{ distribution }}/{{ install_media_name }}
+install_media_name:         CentOS-7-x86_64-Everything-1511.iso
+###############################################################################
+
+###############################################################################
+## for Installing Oracle Database
+###############################################################################
+oracle_version:             11.2.0.4
+oracle_base:                /u01/app/oracle
+oracle_home:                "{{ oracle_base }}/product/{{ oracle_version }}/dbhome_1"
+oracle_user:                oracle
+oracle_password:            welcome1
+oracle_uid:                 54321
+oracle_supplementary_group: "{{ dba_group }},{{ oper_group }}"
+nls_lang:                   American_Japan.AL32UTF8
+bash_profile:
+  - { regexp: "^export ORACLE_BASE", line: "export ORACLE_BASE={{ oracle_base }}" }
+  - { regexp: "^export ORACLE_HOME", line: "export ORACLE_HOME={{ oracle_home }}" }
+  - { regexp: "^export PATH=\\$PATH:\\$ORACLE_HOME/bin", line: "export PATH=$PATH:$ORACLE_HOME/bin" }
+  - { regexp: "^export NLS_LANG", line: "export NLS_LANG={{ nls_lang }}" }
+  - { regexp: "^export ORACLE_SID", line: "export ORACLE_SID={{ oracle_sid }}" }
+  - { regexp: "^umask", line: "umask 022" }
+
+cvuqdisk_rpm:          /vagrant/media/OracleDB/{{ oracle_version }}/database/rpm/cvuqdisk-*.rpm
+runInstaller:          /vagrant/media/OracleDB/{{ oracle_version }}/database/runInstaller
+use_silentinstall:     "yes"
+use_responsefile:      "yes"
+display:               10.0.2.3:0.0
+
+response_file:         db_install.rsp
+response_file_local:   "{{ work_dir_local }}/{{ response_file }}"
+response_file_remote:  "{{ work_dir_remote }}/{{ response_file }}"
+work_dir_local:        /vagrant/Oracle/{{ oracle_version }}-NONRAC-FS
+work_dir_remote :      /tmp/ansible
+
+response_file_replace:
+  - { regexp: "^SELECTED_LANGUAGES=en",              replace: "SELECTED_LANGUAGES=en,ja" }
+  - { regexp: "^oracle.install.option=",             replace: "oracle.install.option=INSTALL_DB_SWONLY" }
+  - { regexp: "^ORACLE_HOSTNAME=",                   replace: "ORACLE_HOSTNAME={{ oracle_hostname }}" }
+  - { regexp: "^UNIX_GROUP_NAME=",                   replace: "UNIX_GROUP_NAME={{ oinstall_group }}" }
+  - { regexp: "^INVENTORY_LOCATION=",                replace: "INVENTORY_LOCATION={{ oracle_base }}/../oraInventory" }
+  - { regexp: "^ORACLE_HOME=",                       replace: "ORACLE_HOME={{ oracle_home }}" }
+  - { regexp: "^ORACLE_BASE=",                       replace: "ORACLE_BASE={{ oracle_base }}" }
+  - { regexp: "^oracle.install.db.DBA_GROUP=",       replace: "oracle.install.db.DBA_GROUP={{ dba_group }}" }
+  - { regexp: "^oracle.install.db.OPER_GROUP=",      replace: "oracle.install.db.OPER_GROUP={{ oper_group }}" }
+  - { regexp: "^oracle.install.db.BACKUPDBA_GROUP=", replace: "oracle.install.db.BACKUPDBA_GROUP={{ dba_group }}" }
+  - { regexp: "^oracle.install.db.DGDBA_GROUP=",     replace: "oracle.install.db.DGDBA_GROUP={{ dba_group }}" }
+  - { regexp: "^oracle.install.db.KMDBA_GROUP=",     replace: "oracle.install.db.KMDBA_GROUP={{ dba_group }}" }
+
+###############################################################################
+
+###############################################################################
+## for Creatting Database
+###############################################################################
+db_name:         orcl
+oracle_sid:      orcl
+sys_password:    welcome1
+system_password: welcome1
+listener_name:   LISTENER
+listener_port:   1521
+
+oracle_scripts_tar:        scripts.tar
+oracle_scripts_dir_remote: "{{ oracle_base }}/admin/{{ db_name }}"
+###############################################################################
+
+###############################################################################
+## for Oracle Database Preinstallaion Tasks
+###############################################################################
+oinstall_group:  oinstall
+dba_group:       dba
+oper_group:      oper
+backupdba_group: backupdba
+dgdba_group:     dgdba
+kmdba_group:     kmdba
+asmdba_group:    asmdba
+asmoper_group:   asmoper
+asmadmin_group:  asmadmin
+
+oracle_groups:
+  - { group: "{{ oinstall_group }}",  gid: 54321 }
+  - { group: "{{ dba_group }}",       gid: 54322 }
+  - { group: "{{ oper_group }}",      gid: 54323 }
+  - { group: "{{ backupdba_group }}", gid: 54324 }
+  - { group: "{{ dgdba_group }}",     gid: 54325 }
+  - { group: "{{ kmdba_group }}",     gid: 54326 }
+  - { group: "{{ asmdba_group }}",    gid: 54327 }
+  - { group: "{{ asmoper_group }}",   gid: 54328 }
+  - { group: "{{ asmadmin_group }}",  gid: 54329 }
+
+limits_conf: 
+  - { limit_item: nofile,  limit_type: soft, value: 1024 }
+  - { limit_item: nofile,  limit_type: hard, value: 65536 }
+  - { limit_item: nproc,   limit_type: soft, value: 2047 }
+  - { limit_item: nproc,   limit_type: hard, value: 16384 }
+  - { limit_item: stack,   limit_type: soft, value: 10240 }
+  - { limit_item: stack,   limit_type: hard, value: 32768 }
+  - { limit_item: memlock, limit_type: soft, value: 3145728 }
+  - { limit_item: memlock, limit_type: hard, value: 3145728 }
+
+sysctl_conf:
+  - { name: kernel.sem,                   value: "250 32000 100 128" }
+  - { name: kernel.shmall,                value: 4294967296 }
+  - { name: kernel.shmmax,                value: 68719476736 }
+  - { name: kernel.shmmni,                value: 4096 }
+  - { name: kernel.panic_on_oops,         value: 1 }
+  - { name: fs.file-max,                  value: 6815744 }
+  - { name: fs.aio-max-nr,                value: 1048576 }
+  - { name: net.ipv4.ip_local_port_range, value: "9000 65500" }
+  - { name: net.core.rmem_default,        value: 262144 }
+  - { name: net.core.rmem_max,            value: 4194304 }
+  - { name: net.core.wmem_default,        value: 262144 }
+  - { name: net.core.wmem_max,            value: 1048576 }
+
+
+os_packages:
+# for CentOS7 ###########################################
+  - { platform: CentOS7, pkg: binutils.x86_64 }
+  - { platform: CentOS7, pkg: compat-libcap1.x86_64 }
+  - { platform: CentOS7, pkg: compat-libstdc++-33.x86_64 }
+  - { platform: CentOS7, pkg: elfutils-libelf-devel.x86_64 }
+  - { platform: CentOS7, pkg: gcc.x86_64 }
+  - { platform: CentOS7, pkg: gcc-c++.x86_64 }
+  - { platform: CentOS7, pkg: glibc.i686 }
+  - { platform: CentOS7, pkg: glibc.x86_64 }
+  - { platform: CentOS7, pkg: glibc-devel.i686 }
+  - { platform: CentOS7, pkg: glibc-devel.x86_64 }
+  - { platform: CentOS7, pkg: ksh.x86_64}
+  - { platform: CentOS7, pkg: libaio.i686 }
+  - { platform: CentOS7, pkg: libaio.x86_64 }
+  - { platform: CentOS7, pkg: libaio-devel.i686 }
+  - { platform: CentOS7, pkg: libaio-devel.x86_64 }
+  - { platform: CentOS7, pkg: libgcc.i686 }
+  - { platform: CentOS7, pkg: libgcc.x86_64 }
+  - { platform: CentOS7, pkg: libstdc++.i686 }
+  - { platform: CentOS7, pkg: libstdc++.x86_64 }
+  - { platform: CentOS7, pkg: libstdc++-devel.i686 }
+  - { platform: CentOS7, pkg: libstdc++-devel.x86_64 }
+  - { platform: CentOS7, pkg: libXi.i686 }
+  - { platform: CentOS7, pkg: libXi.x86_64 }
+  - { platform: CentOS7, pkg: libXtst.i686 }
+  - { platform: CentOS7, pkg: libXtst.x86_64 }
+  - { platform: CentOS7, pkg: make.x86_64 }
+  - { platform: CentOS7, pkg: smartmontools.x86_64 }
+#  - { platform: CentOS7, pkg: pdksh.x86_64 }
+  - { platform: CentOS7, pkg: sysstat.x86_64 }
+# for CentOS6 ###########################################
+  - { platform: CentOS6, pkg: binutils.x86_64 }
+  - { platform: CentOS6, pkg: compat-libcap1.x86_64 }
+  - { platform: CentOS6, pkg: compat-libstdc++-33.x86_64 }
+  - { platform: CentOS6, pkg: compat-libstdc++-33.i686 }
+  - { platform: CentOS6, pkg: gcc.x86_64 }
+  - { platform: CentOS6, pkg: gcc-c++.x86_64 }
+  - { platform: CentOS6, pkg: glibc.i686 }
+  - { platform: CentOS6, pkg: glibc.x86_64 }
+  - { platform: CentOS6, pkg: glibc-devel.x86_64 }
+  - { platform: CentOS6, pkg: glibc-devel.i686 }
+  - { platform: CentOS6, pkg: ksh.x86_64 }
+  - { platform: CentOS6, pkg: libgcc.i686 }
+  - { platform: CentOS6, pkg: libgcc.x86_64 }
+  - { platform: CentOS6, pkg: libstdc++.x86_64 }
+  - { platform: CentOS6, pkg: libstdc++.i686 }
+  - { platform: CentOS6, pkg: libstdc++.x86_64 }
+  - { platform: CentOS6, pkg: libstdc++-devel.i686 }
+  - { platform: CentOS6, pkg: libaio.x86_64 }
+  - { platform: CentOS6, pkg: libaio.i686 }
+  - { platform: CentOS6, pkg: libaio-devel.x86_64 }
+  - { platform: CentOS6, pkg: libaio-devel.i686 }
+  - { platform: CentOS6, pkg: libXext.x86_64 }
+  - { platform: CentOS6, pkg: libXext.i686 }
+  - { platform: CentOS6, pkg: libXtst.x86_64 }
+  - { platform: CentOS6, pkg: libXtst.i686 }
+  - { platform: CentOS6, pkg: libX11.i686 }
+  - { platform: CentOS6, pkg: libX11.x86_64 }
+  - { platform: CentOS6, pkg: libXau.i686 }
+  - { platform: CentOS6, pkg: libXau.x86_64 }
+  - { platform: CentOS6, pkg: libxcb.i686 }
+  - { platform: CentOS6, pkg: libxcb.x86_64 }
+  - { platform: CentOS6, pkg: libXi.i686 }
+  - { platform: CentOS6, pkg: libXi.x86_64 }
+  - { platform: CentOS6, pkg: make.x86_64 }
+  - { platform: CentOS6, pkg: sysstat.x86_64 }
+###############################################################################

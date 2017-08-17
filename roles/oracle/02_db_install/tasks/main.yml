@@ -1,0 +1,88 @@
+- name: copy response file to target host
+  when: use_responsefile == "yes"
+  copy:
+    src: "{{ response_file_local }}"
+    dest: "{{ work_dir_remote }}/"
+    owner: "{{ oracle_user }}"
+    group: "{{ oinstall_group }}"
+    mode: 0644
+
+- name: replace responser_file
+  replace:
+    dest: "{{ response_file_remote }}"
+    regexp: "{{ item.regexp }}"
+    replace: "{{ item.replace }}"
+    backup: yes
+  with_items: "{{ response_file_replace }}"
+
+- name: check whether oracle aleady installed (sqlplus aleady installed)
+  stat: path={{ oracle_home }}/bin/sqlplus
+  register: sqlplus
+
+- name: execute runInstaller -silent -responsefile
+  when: >
+    sqlplus.stat.exists == false
+    and
+    use_silentinstall == "yes"
+    and
+    use_responsefile == "yes"
+
+  become_user: "{{ oracle_user }}"
+  shell: >
+    export LC_ALL=C &&
+    {{ runInstaller }}
+    -waitforcompletion
+    -silent
+    -responseFile {{ response_file_remote }}
+
+  register: cmd_result
+  failed_when:
+    "'The installation of Oracle Database 11g was successful' not in cmd_result.stdout"
+
+- name: execute runInstaller -responsefile
+  when: >
+    sqlplus.stat.exists == false
+    and
+    use_silentinstall == "no"
+    and
+    use_responsefile == "yes"
+
+  become_user: "{{ oracle_user }}"
+  shell: >
+    export LC_ALL=C &&
+    export DISPLAY={{ display }} &&
+    {{ runInstaller }}
+    -waitforcompletion
+    -ignoreSysPrereqs
+    -responseFile {{ response_file_remote }}
+
+  register: cmd_result
+  failed_when:
+    "'The installation of Oracle Database 11g was successful' not in cmd_result.stdout"
+
+- name: execute runInstaller
+  when: >
+    sqlplus.stat.exists == false
+    and
+    use_silentinstall == "no"
+    and
+    use_responsefile == "no"
+
+  become_user: "{{ oracle_user }}"
+  shell: >
+    export LC_ALL=C &&
+    export DISPLAY={{ display }} &&
+    {{ runInstaller }}
+    -waitforcompletion
+    -ignoreSysPrereqs
+
+  register: cmd_result
+  failed_when:
+    "'The installation of Oracle Database 11g was successful' not in cmd_result.stdout"
+
+- name: check error log file size
+  shell: "ls -l {{ oracle_base }}/../oraInventory/logs/oraInstall*.err | cut -d' ' -f5"
+  register: errfile_size
+  failed_when:
+    "'0' not in errfile_size.stdout"
+

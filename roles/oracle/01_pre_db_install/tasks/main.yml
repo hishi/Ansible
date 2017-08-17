@@ -1,0 +1,135 @@
+- name: add oracle groups (ex. oinstall, dba, ...)
+  group:
+    name: "{{ item.group }}"
+    gid: "{{ item.gid }}"
+    state: present
+  with_items: "{{ oracle_groups }}"
+
+- name: get oracle_password hash
+  command: python -c 'import crypt; print crypt.crypt("{{ oracle_password }}", "$6$SomeSalt$")'
+  register: oracle_password_hash
+
+- name: add user oracle
+  user:
+    name: "{{ oracle_user }}"
+    uid: "{{ oracle_uid }}"
+    group: "{{ oinstall_group }}"
+    groups: "{{ oracle_supplementary_group }}"
+    password: "{{ oracle_password_hash.stdout }}"
+    state: present
+
+- name: mount os install media
+  mount:
+    name: "{{ mount_point_for_linux }}"
+    src: "{{ iso_for_linux }}"
+    fstype: iso9660
+    opts: ro,loop
+    state: mounted
+
+- name: install os packages
+  when: item.platform == "{{ distribution }}{{ distribution_major_version }}"
+  yum: 
+    name: "{{ item.pkg }}"
+    disablerepo: "*"
+    enablerepo: "{{ yum_repository_name }}"
+    state: present
+  with_items: "{{ os_packages }}"
+  tags:
+    - os_packages
+
+- name: unmount os install media
+  mount:
+    name: "{{ mount_point_for_linux }}"
+    src: "{{ iso_for_linux }}"
+    fstype: iso9660
+    state: unmounted
+
+- name: install cvuqdisk-xx.rpm
+  shell: >
+    export CVUQDISK_GRP={{ oinstall_group }};
+    rpm -Uvh {{ cvuqdisk_rpm }}
+  register: cmd_result
+  failed_when: '"error" in cmd_result.stderr'
+
+- name: create directory ORACLE_BASE
+  file: 
+    path: "{{ oracle_base }}"
+    owner: "{{ oracle_user }}"
+    group: "{{ oinstall_group }}"
+    mode: 0755
+    state: directory
+
+- name: get selinux status
+  command: getenforce
+  register: selinux_status
+
+- name: disable selinux
+  when: selinux_status.stdout == "Enforcing"
+  lineinfile:
+    dest: /etc/selinux/config
+    regexp: "^SELINUX="
+    line: "SELINUX=disabled"
+    backup: yes
+
+- name: reboot
+  when: selinux_status.stdout == "Enforcing"
+  command: shutdown -r now
+
+- name: wait for ssh port down
+  when: selinux_status.stdout == "Enforcing"
+  local_action: wait_for
+    host={{ inventory_hostname }}
+    port={{ ansible_port }}
+    state=stopped
+
+- name: wait for ssh port up
+  when: selinux_status.stdout == "Enforcing"
+  local_action: wait_for
+    host={{ inventory_hostname }}
+    port={{ ansible_port }}
+    state=started
+
+- name: update /etc/security/limits.conf
+  pam_limits:
+    domain: "{{ oracle_user }}"
+    limit_item: "{{ item.limit_item }}"
+    limit_type: "{{ item.limit_type }}"
+    value: "{{ item.value }}"
+    backup: yes
+  with_items: "{{ limits_conf }}"
+
+- name: backup /etc/sysctl.conf
+  shell: "cp -p /etc/sysctl.conf /etc/sysctl.conf.`date\ +'%Y%m%d_%H%M%S'`"
+
+- name: comment out net.bridge.bridge-nf-call-ip6tables of /etc/sysctl.conf
+  lineinfile:
+    dest: /etc/sysctl.conf
+    regexp: "^net.bridge.bridge-nf-call-ip6tables"
+    line: "#net.bridge.bridge-nf-call-ip6tables"
+
+- name: comment out net.bridge.bridge-nf-call-iptables of /etc/syctl.conf
+  lineinfile: 
+    dest: /etc/sysctl.conf
+    regexp: "^net.bridge.bridge-nf-call-iptables"
+    line: "#net.bridge.bridge-nf-call-iptables"
+
+- name: comment out net.bridge.bridge-nf-call-arptables of /etc/syctl.conf
+  lineinfile: 
+    dest: /etc/sysctl.conf
+    regexp: "^net.bridge.bridge-nf-call-arptables"
+    line: "#net.bridge.bridge-nf-call-arptables"
+  
+- name: update /etc/sysctl.conf
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+  with_items: "{{ sysctl_conf }}"
+
+- name: update /home/oracle/.bash_profile
+  lineinfile:
+    dest: /home/{{ oracle_user }}/.bash_profile
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    backup: yes
+  with_items: "{{ bash_profile }}"
+

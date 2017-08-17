@@ -1,0 +1,10 @@
+- hosts: all
+  become: yes
+  become_method: sudo
+  remote_user: ansible
+  gather_facts: yes
+  roles:
+    - { role: oracle/01_pre_db_install }
+    - { role: oracle/02_db_install }
+    - { role: oracle/03_dbca }
+
